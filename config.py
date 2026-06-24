@@ -92,5 +92,8 @@ _bw = os.getenv("WORD_BLACKLIST", "")
 _extra = [w.strip().lower() for w in _bw.split(",") if w.strip()]
 WORD_BLACKLIST: list[str] = [w.lower() for w in _default_blacklist] + _extra
 
+# Slack
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+
 # Reconnect
 RECONNECT_DELAY_SECONDS = int(os.getenv("RECONNECT_DELAY_SECONDS", "5"))

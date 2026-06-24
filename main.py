@@ -11,7 +11,23 @@ import signal
 import sys
 from datetime import datetime, timezone
 
+import requests
 import config
+
+
+def _slack(title: str, message: str = "", fields: dict | None = None) -> None:
+    if not config.SLACK_WEBHOOK_URL:
+        return
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*"}}]
+    if message:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": message}})
+    if fields:
+        field_text = "\n".join(f"*{k}:* {v}" for k, v in fields.items())
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": field_text}})
+    try:
+        requests.post(config.SLACK_WEBHOOK_URL, json={"blocks": blocks}, timeout=5)
+    except Exception as exc:
+        log.debug("Slack notify failed: %s", exc)
 from ingest import stream_pcm
 from vad import load_vad_model, SpeechSegmenter
 from transcribe import load_whisper, transcribe
@@ -81,6 +97,11 @@ def run(stream_url: str, model_size: str) -> None:
 
     log.info("Pipeline ready. Listening to: %s", stream_url)
     log.info("Keyword watchlist: %s", config.KEYWORD_WATCHLIST or "(none)")
+    _slack("Radio Logger Started", fields={
+        "Stream": stream_url[:60],
+        "Model": model_size,
+        "Keywords": ", ".join(config.KEYWORD_WATCHLIST) or "(none)",
+    })
 
     # Graceful shutdown on Ctrl-C
     def _shutdown(sig, frame):
@@ -113,6 +134,13 @@ def run(stream_url: str, model_size: str) -> None:
         )
         _print_transmission(now, result.text, result.duration_seconds,
                             result.avg_confidence, matched, row_id)
+
+        if matched:
+            _slack("Keyword Detected", message=result.text[:200], fields={
+                "Keywords": ", ".join(matched),
+                "Time": now.strftime("%H:%M:%S UTC"),
+                "Confidence": f"{result.avg_confidence:.2f}",
+            })
 
 
 def main() -> None:
