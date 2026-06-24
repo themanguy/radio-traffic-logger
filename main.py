@@ -7,27 +7,15 @@ Usage:
 
 import argparse
 import logging
-import os
 import signal
 import sys
 from datetime import datetime, timezone
-
-from dotenv import load_dotenv
-load_dotenv()
 
 import config
 from ingest import stream_pcm
 from vad import load_vad_model, SpeechSegmenter
 from transcribe import load_whisper, transcribe
 from database import init_db, insert_transmission, export_csv
-
-# Slack notifications (optional — silent if webhook not configured)
-sys.path.insert(0, os.path.expanduser("~/projects/shared"))
-from slack_notify import notify as _slack_notify
-
-def _slack(title, message="", level="info", fields=None):
-    _slack_notify(title=title, message=message, level=level,
-                  channel="fenz", fields=fields, source="fenz-monitor")
 
 # ── logging setup ──────────────────────────────────────────────────────────────
 
@@ -93,15 +81,6 @@ def run(stream_url: str, model_size: str) -> None:
 
     log.info("Pipeline ready. Listening to: %s", stream_url)
     log.info("Keyword watchlist: %s", config.KEYWORD_WATCHLIST or "(none)")
-    _slack(
-        "📡 FENZ Monitor Started",
-        message=f"Listening to stream.",
-        fields={
-            "Stream": stream_url[:60],
-            "Whisper model": model_size,
-            "Keywords": ", ".join(config.KEYWORD_WATCHLIST) or "(none)",
-        },
-    )
 
     # Graceful shutdown on Ctrl-C
     def _shutdown(sig, frame):
@@ -111,13 +90,7 @@ def run(stream_url: str, model_size: str) -> None:
 
     signal.signal(signal.SIGINT, _shutdown)
 
-    try:
-        pcm_stream = stream_pcm(stream_url)
-    except Exception as e:
-        log.error("Failed to open stream: %s", e)
-        _slack("🔴 FENZ: Stream Error", message=str(e), level="error",
-               fields={"Stream": stream_url[:60]})
-        sys.exit(1)
+    pcm_stream = stream_pcm(stream_url)
 
     for segment in segmenter.process(pcm_stream):
         result = transcribe(whisper, segment)
@@ -140,19 +113,6 @@ def run(stream_url: str, model_size: str) -> None:
         )
         _print_transmission(now, result.text, result.duration_seconds,
                             result.avg_confidence, matched, row_id)
-
-        if matched:
-            _slack(
-                "🚨 FENZ: Keyword Detected",
-                message=result.text[:200],
-                level="warning",
-                fields={
-                    "Keywords":  ", ".join(matched),
-                    "Timestamp": now.strftime("%H:%M:%S UTC"),
-                    "Duration":  f"{result.duration_seconds:.1f}s",
-                    "Confidence": f"{result.avg_confidence:.2f}",
-                },
-            )
 
 
 def main() -> None:
